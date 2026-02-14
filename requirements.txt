@@ -2,12 +2,21 @@ streamlit
 pandas
 numpy
 matplotlib
-seaborn
-torch
-transformers
-umap-learn
-hdbscan
 scikit-learn
+
+transformers
+datasets
+accelerate
+evaluate
+sentencepiece
+safetensors
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+
+tensorflow
+python-3.11
+
 
 
 
