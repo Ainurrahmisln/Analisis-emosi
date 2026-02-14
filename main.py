@@ -609,7 +609,7 @@ with tab1:
             # max_steps=60 if fast_mode else -1,
 
             weight_decay=0.01,
-            evaluation_strategy="no",
+            eval_strategy="no",
             save_strategy="no",
             load_best_model_at_end=False,
 
@@ -833,3 +833,4 @@ with tab2:
             plot_hist(tmp["len_word"], "Distribusi Panjang Komentar (Jumlah Kata)", "Jumlah kata")
         else:
             st.warning(f"Kolom `{TEXT_COL}` tidak ada, jadi EDA panjang komentar tidak ditampilkan.")
+
