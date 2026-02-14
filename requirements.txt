@@ -1,21 +1,19 @@
-streamlit
-pandas
-numpy
-matplotlib
-scikit-learn
-
-transformers
 datasets
 accelerate
 evaluate
 sentencepiece
 safetensors
-
-torch
-
 tensorflow
-python-3.11
-
+streamlit
+pandas
+numpy
+matplotlib
+seaborn
+torch
+transformers
+umap-learn
+hdbscan
+scikit-learn
 
 
 
