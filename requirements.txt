@@ -1,0 +1,16 @@
+streamlit
+pandas
+numpy
+matplotlib
+seaborn
+torch
+transformers
+umap-learn
+hdbscan
+scikit-learn
+
+
+
+
+
+
