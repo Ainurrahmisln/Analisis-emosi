@@ -8,11 +8,8 @@ transformers==5.1.0
 datasets==4.5.0
 accelerate==1.12.0
 sentencepiece==0.2.1
-safetensors==0.7.0
 
 torch==2.10.0
-tensorflow-cpu==2.20.0
-
 
 
 
