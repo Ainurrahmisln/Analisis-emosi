@@ -1,3 +1,4 @@
+# main.py
 import io
 import re
 import unicodedata
@@ -5,7 +6,7 @@ import hashlib
 import json
 import os
 import gc
-from dataclasses import dataclass
+import traceback
 
 import numpy as np
 import pandas as pd
@@ -17,88 +18,152 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
 
+
 # =========================
 # STREAMLIT CLOUD / RAM SAVER
 # =========================
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 # =========================
-# OPTIONAL LIBS (biar app tetap kebuka walau belum install)
+# OPTIONAL IMPORTS (tampilkan error aslinya kalau gagal)
 # =========================
-try:
-    import torch
-    import torch.nn as nn
-    from torch.utils.data import Dataset as TorchDataset, DataLoader
-except Exception:
-    torch = None
-    nn = None
-    TorchDataset = None
-    DataLoader = None
+_IMPORT_ERRORS = {}
 
-try:
-    import accelerate  # noqa: F401
-except Exception:
-    accelerate = None
+def _optional_import(name: str, hint: str = ""):
+    try:
+        mod = __import__(name)
+        return mod
+    except Exception:
+        _IMPORT_ERRORS[name] = (hint, traceback.format_exc())
+        return None
 
-try:
-    from datasets import Dataset
-except Exception:
-    Dataset = None
+torch = _optional_import("torch", "pip install torch")
+transformers = _optional_import("transformers", "pip install transformers accelerate sentencepiece")
 
-try:
-    from transformers import (
-        AutoTokenizer,
-        AutoModel,
-        AutoModelForSequenceClassification,
-        DataCollatorWithPadding,
-        TrainingArguments,
-        Trainer,
-        set_seed,
-    )
-except Exception:
+if transformers is not None:
+    try:
+        from transformers import (
+            AutoTokenizer,
+            AutoModelForSequenceClassification,
+            DataCollatorWithPadding,
+            TrainingArguments,
+            Trainer,
+        )
+    except Exception:
+        _IMPORT_ERRORS["transformers_subimports"] = ("pip install transformers", traceback.format_exc())
+        AutoTokenizer = None
+        AutoModelForSequenceClassification = None
+        DataCollatorWithPadding = None
+        TrainingArguments = None
+        Trainer = None
+else:
     AutoTokenizer = None
-    AutoModel = None
     AutoModelForSequenceClassification = None
     DataCollatorWithPadding = None
     TrainingArguments = None
     Trainer = None
-    set_seed = None
+
+accelerate = _optional_import("accelerate", "pip install accelerate")
+
 
 # =========================
 # STREAMLIT CONFIG
 # =========================
-st.set_page_config(
-    page_title="Analisis Emosi (EDA + Evaluasi IndoBERT & GRU PyTorch)",
-    layout="wide",
-)
+st.set_page_config(page_title="Analisis Emosi (EDA + Evaluasi IndoBERT & GRU)", layout="wide")
 
 # =========================
-# (Opsional) CSS sederhana
+# THEME CSS (punya kamu)
 # =========================
-st.markdown(
-    """
+st.markdown("""
 <style>
-:root{ --pink:#ED5D96; --soft: rgba(237,93,150,0.12); }
+:root{
+  --pink:#ED5D96;
+  --darkred:#7B0101;
+  --softpink: rgba(237,93,150,0.12);
+  --softred: rgba(123,1,1,0.10);
+  --text:#111111;
+  --border: rgba(237,93,150,0.45);
+}
+html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] > .main{
+  background: #ffffff !important;
+  color: var(--text) !important;
+}
+[data-testid="stHeader"]{ background: rgba(0,0,0,0) !important; }
+section[data-testid="stSidebar"]{
+  background: #ffffff !important;
+  border-right: 2px solid var(--pink) !important;
+}
+section[data-testid="stSidebar"] > div{ background: #ffffff !important; }
+section[data-testid="stSidebar"] *{ color: var(--text) !important; }
 .main .block-container{
+  background: #ffffff !important;
   border: 2px solid var(--pink);
-  border-radius: 18px;
+  border-radius: 22px;
   padding: 2rem 2rem 3rem;
-  box-shadow: 0 10px 30px var(--soft);
+  box-shadow: 0 10px 30px var(--softpink);
 }
-.card{
-  border: 2px solid rgba(237,93,150,0.60);
-  border-radius: 14px;
-  padding: 14px;
-  box-shadow: 0 8px 18px rgba(237,93,150,0.18);
-  background: #fff;
+div[data-testid="metric-container"]{
+  background: linear-gradient(135deg, var(--softpink), var(--softred)) !important;
+  border: 2px solid var(--border) !important;
+  border-radius: 18px !important;
+  padding: 12px 14px !important;
 }
+div[data-testid="metric-container"] *{ color: var(--text) !important; }
+div[data-testid="stDataFrame"]{
+  background: #ffffff !important;
+  border: 1.5px solid rgba(237,93,150,0.35) !important;
+  border-radius: 14px !important;
+  padding: 6px !important;
+}
+div[data-testid="stExpander"]{
+  border: 1.5px solid rgba(237,93,150,0.35) !important;
+  border-radius: 14px !important;
+  background: #ffffff !important;
+}
+.card-pink{
+  background: radial-gradient(circle at center,
+    rgba(123,1,1,0.18) 0%,
+    rgba(237,93,150,0.14) 55%,
+    rgba(255,255,255,1) 100%) !important;
+  border: 2px solid rgba(237,93,150,0.60) !important;
+  border-radius: 14px !important;
+  padding: 14px !important;
+  box-shadow: 0 8px 18px rgba(237,93,150,0.18) !important;
+}
+.gap-emosi-table{ height: 22px; }
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
 st.title("ANALISIS EMOSI KOMENTAR YOUTUBE TERKAIT KEKERASAN SEKSUAL MEI 1998")
 st.caption("Upload CSV → EDA → Preprocessing → Distribusi Emosi → Train IndoBERT & GRU (PyTorch) → Evaluasi (TEST)")
+
+
+# =========================
+# DIAGNOSTIC (biar jelas kenapa dianggap 'belum siap')
+# =========================
+with st.expander("🧪 Diagnostik library (kalau error import)"):
+    st.write("Kalau deploy gagal/anggap library belum siap, cek detail di sini.")
+    st.write("Python:", os.sys.version)
+    if torch is not None:
+        st.write("torch:", getattr(torch, "__version__", "unknown"))
+    else:
+        st.error("torch gagal import")
+
+    if transformers is not None:
+        st.write("transformers:", getattr(transformers, "__version__", "unknown"))
+    else:
+        st.error("transformers gagal import")
+
+    if accelerate is not None:
+        st.write("accelerate:", getattr(accelerate, "__version__", "unknown"))
+    else:
+        st.warning("accelerate gagal import (Trainer butuh accelerate)")
+
+    if _IMPORT_ERRORS:
+        st.code("\n\n".join(
+            [f"[{k}] Hint: {v[0]}\n{v[1]}" for k, v in _IMPORT_ERRORS.items()]
+        ))
+
 
 # =========================
 # EMOJI MAP
@@ -114,7 +179,6 @@ EMOJI_MAP = {
     "lainnya": "❓",
     "other": "❓",
 }
-
 def get_emoji(label: str) -> str:
     key = "" if label is None else str(label).strip().lower()
     return EMOJI_MAP.get(key, "❓")
@@ -185,6 +249,15 @@ def load_csv_from_bytes(file_bytes: bytes, encoding="utf-8"):
 # =========================
 # PLOT HELPERS
 # =========================
+def plot_hist(series, title, xlabel):
+    fig = plt.figure(figsize=(8, 3.5))
+    vals = series.dropna().values
+    plt.hist(vals, bins=30)
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel("Frekuensi")
+    st.pyplot(fig, clear_figure=True)
+
 def plot_confusion(cm, labels, title="Confusion Matrix"):
     fig = plt.figure(figsize=(6.5, 5.5))
     plt.imshow(cm, interpolation="nearest", cmap="Blues")
@@ -205,6 +278,7 @@ def plot_confusion(cm, labels, title="Confusion Matrix"):
     plt.tight_layout()
     st.pyplot(fig, clear_figure=True)
 
+
 # =========================
 # SIDEBAR
 # =========================
@@ -218,6 +292,11 @@ with st.sidebar:
     st.subheader("Kolom CSV")
     TEXT_COL  = st.text_input("Kolom komentar", value="Komentar")
     LABEL_COL = st.text_input("Kolom label emosi (true)", value="label_emosi_autofixed")
+
+    st.divider()
+    st.subheader("EDA & Cleaning")
+    show_eda_detail = st.checkbox("Tampilkan EDA detail", value=True)
+    drop_duplicates = st.checkbox("Drop duplikasi komentar (untuk proses)", value=True)
 
     st.divider()
     st.subheader("Preprocessing")
@@ -239,13 +318,10 @@ with st.sidebar:
     st.divider()
     st.subheader("⚡ Mode cepat (biar nggak lama)")
     fast_mode = st.checkbox("Aktifkan mode cepat", value=True)
-    max_train_samples = st.number_input("Batas data training (0 = semua)", min_value=0, value=5000, step=500)
-
+    max_train_samples = st.number_input("Batas data training (0 = semua)", min_value=0, value=3000, step=500)
     bert_epochs = st.number_input("Epoch IndoBERT", min_value=1, value=1 if fast_mode else 3, step=1)
-    gru_epochs  = st.number_input("Epoch GRU", min_value=1, value=2 if fast_mode else 8, step=1)
-
-    gru_batch   = st.number_input("Batch GRU", min_value=8, value=64 if fast_mode else 128, step=8)
-    st.caption("Catatan: Training di Cloud berat. Default dibuat ringan.")
+    gru_epochs  = st.number_input("Epoch GRU", min_value=1, value=3 if fast_mode else 10, step=1)
+    gru_batch   = st.number_input("Batch GRU", min_value=8, value=128 if fast_mode else 64, step=8)
 
     st.divider()
     st.subheader("Run Training")
@@ -270,15 +346,22 @@ if uploaded is None:
 
 file_bytes = uploaded.getvalue()
 file_hash = hashlib.md5(file_bytes).hexdigest()
-
 df_raw = load_csv_from_bytes(file_bytes, encoding=encoding)
 
+
+# =========================
+# PREPROCESS + FILTER
+# =========================
 if TEXT_COL not in df_raw.columns:
     st.error(f"Kolom komentar `{TEXT_COL}` tidak ditemukan.")
     st.stop()
 
 df = df_raw.copy()
 df[TEXT_COL] = df[TEXT_COL].astype(str)
+
+if drop_duplicates:
+    df = df.drop_duplicates(subset=[TEXT_COL]).reset_index(drop=True)
+
 df["text_norm"] = df[TEXT_COL].apply(lambda x: preprocess_text_pipeline(x, do_clean, do_lower, do_norm))
 
 if use_word_filter:
@@ -288,12 +371,16 @@ if use_word_filter:
 
 st.session_state["df_proc"] = df
 
-# invalidate results on config change
+
+# =========================
+# INVALIDATION
+# =========================
 run_config = {
     "file_hash": file_hash,
     "encoding": encoding,
     "TEXT_COL": TEXT_COL,
     "LABEL_COL": LABEL_COL,
+    "drop_duplicates": drop_duplicates,
     "do_clean": do_clean,
     "do_lower": do_lower,
     "do_norm": do_norm,
@@ -313,25 +400,27 @@ if st.session_state.get("run_hash") != run_hash:
     st.session_state["run_hash"] = run_hash
     st.session_state.pop("results", None)
 
+
 # =========================
-# LIB CHECKS
+# TABS
 # =========================
-def require_indobert_libs_or_stop():
-    if torch is None or AutoTokenizer is None or AutoModelForSequenceClassification is None or Trainer is None or Dataset is None:
-        st.error("Library IndoBERT belum siap. Install: torch, transformers, datasets, accelerate, sentencepiece.")
+tab1, tab2 = st.tabs(["🏠 Ringkas (seperti gambar)", "📊 EDA Detail"])
+
+
+# =========================
+# TRAINING / EVAL HELPERS
+# =========================
+def require_libs_or_stop():
+    if torch is None:
+        st.error("PyTorch (torch) belum siap / gagal import. Lihat expander Diagnostik di atas.")
+        st.stop()
+    if transformers is None or AutoTokenizer is None or Trainer is None or TrainingArguments is None:
+        st.error("Transformers/Trainer belum siap. Pastikan: transformers + accelerate + sentencepiece.")
         st.stop()
     if accelerate is None:
-        st.error("accelerate belum terpasang. Install: accelerate.")
+        st.error("accelerate belum siap (Trainer butuh accelerate). Install: accelerate.")
         st.stop()
 
-def require_gru_libs_or_stop():
-    if torch is None or AutoTokenizer is None or AutoModel is None:
-        st.error("Library GRU (PyTorch) belum siap. Install: torch, transformers.")
-        st.stop()
-
-# =========================
-# Trainer with class weights
-# =========================
 class WeightedTrainer(Trainer):
     def __init__(self, class_weights, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -345,54 +434,64 @@ class WeightedTrainer(Trainer):
         loss = loss_fct(logits, labels)
         return (loss, outputs) if return_outputs else loss
 
-# =========================
-# GRU Torch model
-# =========================
-class TorchTokenDataset(TorchDataset):
-    def __init__(self, input_ids, attention_mask, labels):
-        self.input_ids = input_ids
-        self.attention_mask = attention_mask
+class TorchTextDataset(torch.utils.data.Dataset):
+    def __init__(self, texts, labels, tokenizer, max_len):
         self.labels = labels
+        self.enc = tokenizer(
+            list(texts),
+            truncation=True,
+            max_length=int(max_len),
+            padding=False,
+        )
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        return {
-            "input_ids": self.input_ids[idx],
-            "attention_mask": self.attention_mask[idx],
-            "labels": self.labels[idx],
-        }
+        item = {k: self.enc[k][idx] for k in self.enc.keys()}
+        item["labels"] = int(self.labels[idx])
+        return item
 
-class BertEmbeddingGRUClassifier(nn.Module):
-    def __init__(self, emb_weight: torch.Tensor, pad_id: int, num_labels: int, hidden_size: int = 64, dropout: float = 0.2):
+class GRUClassifier(torch.nn.Module):
+    def __init__(self, emb_weight, pad_id: int, hidden_size: int, num_labels: int, dropout: float):
         super().__init__()
-        self.embedding = nn.Embedding.from_pretrained(emb_weight, freeze=True, padding_idx=pad_id)
-        self.gru = nn.GRU(
-            input_size=emb_weight.shape[1],
-            hidden_size=hidden_size,
-            num_layers=1,
-            batch_first=True,
-            bidirectional=True,
+        self.embedding = torch.nn.Embedding.from_pretrained(
+            embeddings=emb_weight,
+            freeze=True,
+            padding_idx=pad_id
         )
-        self.dropout = nn.Dropout(dropout)
-        self.fc = nn.Linear(hidden_size * 2, num_labels)
+        emb_dim = emb_weight.shape[1]
+        self.gru = torch.nn.GRU(
+            input_size=emb_dim,
+            hidden_size=hidden_size,
+            batch_first=True,
+            bidirectional=True
+        )
+        self.dropout = torch.nn.Dropout(dropout)
+        self.fc = torch.nn.Linear(hidden_size * 2, num_labels)
 
-    def forward(self, input_ids, attention_mask):
+    def forward(self, input_ids, attention_mask=None):
         x = self.embedding(input_ids)  # [B, T, E]
-        lengths = attention_mask.sum(dim=1).to(torch.int64).cpu()
-        packed = nn.utils.rnn.pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False)
-        _, h_n = self.gru(packed)  # h_n: [2, B, H]
-        h_fwd = h_n[-2]
-        h_bwd = h_n[-1]
-        h = torch.cat([h_fwd, h_bwd], dim=1)  # [B, 2H]
-        h = self.dropout(h)
-        logits = self.fc(h)
+
+        if attention_mask is not None:
+            lengths = attention_mask.sum(dim=1).clamp(min=1).to("cpu")
+            packed = torch.nn.utils.rnn.pack_padded_sequence(
+                x, lengths, batch_first=True, enforce_sorted=False
+            )
+            packed_out, h = self.gru(packed)
+        else:
+            out, h = self.gru(x)
+
+        # h: [num_directions, B, H] karena 1 layer
+        # bidirectional => 2, jadi concat
+        h_fwd = h[0]
+        h_bwd = h[1]
+        h_cat = torch.cat([h_fwd, h_bwd], dim=1)  # [B, 2H]
+
+        z = self.dropout(h_cat)
+        logits = self.fc(z)
         return logits
 
-# =========================
-# TRAIN ALL
-# =========================
 def run_all_training(
     df_in: pd.DataFrame,
     text_col: str,
@@ -406,19 +505,14 @@ def run_all_training(
     fast_mode: bool,
     max_train_samples: int
 ):
-    require_indobert_libs_or_stop()
-    require_gru_libs_or_stop()
+    require_libs_or_stop()
 
-    if set_seed is not None:
-        set_seed(seed)
-
-    # hemat CPU threads
+    # hemat CPU
     try:
         torch.set_num_threads(1)
     except Exception:
         pass
 
-    # ---------- Data prepare ----------
     data = df_in[[text_col, label_col]].dropna().copy()
     data[text_col] = data[text_col].astype(str).str.strip()
     data[label_col] = data[label_col].astype(str).str.strip().str.lower()
@@ -438,47 +532,30 @@ def run_all_training(
         temp_df, test_size=0.5, random_state=seed, stratify=temp_df["label_id"]
     )
 
-    # class weights
     classes = np.unique(train_df["label_id"].values)
     cw = compute_class_weight(class_weight="balanced", classes=classes, y=train_df["label_id"].values)
-    class_weights_torch = torch.tensor(cw, dtype=torch.float32)
+    class_weights_torch = torch.tensor(cw, dtype=torch.float)
 
-    # ---------- Tokenizer + HF Datasets ----------
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     effective_max_len = int(max_len)
     if fast_mode and effective_max_len > 96:
         effective_max_len = 96
 
-    def tok_batch(texts):
-        return tokenizer(
-            texts,
-            truncation=True,
-            max_length=effective_max_len,
-            padding=False,
-        )
-
-    train_ds = Dataset.from_pandas(train_df[[text_col, "label_id"]].rename(columns={"label_id": "labels"}))
-    val_ds   = Dataset.from_pandas(val_df[[text_col, "label_id"]].rename(columns={"label_id": "labels"}))
-    test_ds  = Dataset.from_pandas(test_df[[text_col, "label_id"]].rename(columns={"label_id": "labels"}))
-
-    train_ds = train_ds.map(lambda b: tok_batch(b[text_col]), batched=True, remove_columns=[text_col])
-    val_ds   = val_ds.map(lambda b: tok_batch(b[text_col]),   batched=True, remove_columns=[text_col])
-    test_ds  = test_ds.map(lambda b: tok_batch(b[text_col]),  batched=True, remove_columns=[text_col])
+    train_ds = TorchTextDataset(train_df[text_col].tolist(), train_df["label_id"].tolist(), tokenizer, effective_max_len)
+    val_ds   = TorchTextDataset(val_df[text_col].tolist(),   val_df["label_id"].tolist(),   tokenizer, effective_max_len)
+    test_ds  = TorchTextDataset(test_df[text_col].tolist(),  test_df["label_id"].tolist(),  tokenizer, effective_max_len)
 
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
     id2label = {i: name for i, name in enumerate(label_names)}
     label2id = {name: i for i, name in enumerate(label_names)}
 
-    # =========================
-    # IndoBERT fine-tune (ringan)
-    # =========================
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name, num_labels=num_labels, id2label=id2label, label2id=label2id
     )
 
-    # hemat RAM
+    # hemat mem
     try:
         model.config.use_cache = False
     except Exception:
@@ -488,7 +565,6 @@ def run_all_training(
     except Exception:
         pass
 
-    # fast_mode: freeze encoder, train head only
     if fast_mode:
         base = getattr(model, model.base_model_prefix, None)
         if base is not None:
@@ -496,9 +572,6 @@ def run_all_training(
                 p.requires_grad = False
 
     use_cuda = bool(torch.cuda.is_available())
-    device = torch.device("cuda" if use_cuda else "cpu")
-
-    # NOTE: transformers terbaru pakai eval_strategy (bukan evaluation_strategy)
     training_args = TrainingArguments(
         output_dir="indobert_out",
         learning_rate=5e-5 if fast_mode else 2e-5,
@@ -507,14 +580,15 @@ def run_all_training(
         gradient_accumulation_steps=8,
         num_train_epochs=int(bert_epochs),
         weight_decay=0.01,
-        eval_strategy="no",
+        evaluation_strategy="no",
         save_strategy="no",
+        load_best_model_at_end=False,
+        dataloader_num_workers=0,
+        dataloader_pin_memory=False,
         logging_steps=50,
         seed=seed,
         report_to="none",
         fp16=bool(use_cuda),
-        dataloader_num_workers=0,
-        dataloader_pin_memory=False,
     )
 
     trainer = WeightedTrainer(
@@ -528,10 +602,7 @@ def run_all_training(
 
     trainer.train()
 
-    gc.collect()
-    if use_cuda:
-        torch.cuda.empty_cache()
-
+    # eval BERT
     test_pred = trainer.predict(test_ds)
     bert_logits = test_pred.predictions
     bert_y_true = test_pred.label_ids
@@ -542,123 +613,135 @@ def run_all_training(
     bert_cm = confusion_matrix(bert_y_true, bert_y_pred, labels=list(range(num_labels)))
     bert_report = classification_report(bert_y_true, bert_y_pred, target_names=label_names, output_dict=True, zero_division=0)
 
-    # =========================
-    # GRU PyTorch (Embedding IndoBERT -> GRU)
-    # =========================
-    base_model = AutoModel.from_pretrained(model_name)
-    emb_weight = base_model.embeddings.word_embeddings.weight.detach().clone()
+    # bersihin trainer pred buffer
+    gc.collect()
+    if use_cuda:
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
 
+    # =========================
+    # GRU (PyTorch) pakai embedding IndoBERT
+    # =========================
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
 
-    def to_torch_ds(hfds):
-        # pad jadi tensor
-        batch = data_collator([hfds[i] for i in range(len(hfds))])
-        input_ids = batch["input_ids"]
-        attn = batch["attention_mask"]
-        labels = batch["labels"]
-        return input_ids, attn, labels
+    # embedding weight langsung dari model fine-tuned
+    emb_weight = model.get_input_embeddings().weight.detach().cpu()
 
-    # biar hemat RAM, kita build tensor per-split
-    Xtr_ids, Xtr_attn, ytr = to_torch_ds(train_ds)
-    Xva_ids, Xva_attn, yva = to_torch_ds(val_ds)
-    Xte_ids, Xte_attn, yte = to_torch_ds(test_ds)
+    # tokenize untuk GRU (pakai padding max_length biar gampang)
+    def encode_for_gru(texts):
+        enc = tokenizer(
+            list(texts),
+            truncation=True,
+            max_length=effective_max_len,
+            padding="max_length",
+            return_tensors="pt"
+        )
+        return enc["input_ids"], enc["attention_mask"]
 
-    train_tds = TorchTokenDataset(Xtr_ids, Xtr_attn, ytr)
-    val_tds   = TorchTokenDataset(Xva_ids, Xva_attn, yva)
-    test_tds  = TorchTokenDataset(Xte_ids, Xte_attn, yte)
+    X_train_ids, M_train = encode_for_gru(train_df[text_col].tolist())
+    X_val_ids,   M_val   = encode_for_gru(val_df[text_col].tolist())
+    X_test_ids,  M_test  = encode_for_gru(test_df[text_col].tolist())
 
+    y_train = torch.tensor(train_df["label_id"].values, dtype=torch.long)
+    y_val   = torch.tensor(val_df["label_id"].values, dtype=torch.long)
+    y_test  = torch.tensor(test_df["label_id"].values, dtype=torch.long)
+
+    device = torch.device("cuda" if use_cuda else "cpu")
     hidden = 64 if fast_mode else 128
     drop = 0.2 if fast_mode else 0.3
 
-    gru_model = BertEmbeddingGRUClassifier(
-        emb_weight=emb_weight,
-        pad_id=pad_id,
-        num_labels=num_labels,
-        hidden_size=hidden,
-        dropout=drop,
-    ).to(device)
+    gru_model = GRUClassifier(emb_weight, pad_id=pad_id, hidden_size=hidden, num_labels=num_labels, dropout=drop).to(device)
+    loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights_torch.to(device))
+    opt = torch.optim.Adam(gru_model.parameters(), lr=1e-3)
 
-    optimizer = torch.optim.Adam([p for p in gru_model.parameters() if p.requires_grad], lr=1e-3)
-    loss_fn = nn.CrossEntropyLoss(weight=class_weights_torch.to(device))
+    def make_loader(X, M, y, batch):
+        ds = torch.utils.data.TensorDataset(X, M, y)
+        return torch.utils.data.DataLoader(ds, batch_size=int(batch), shuffle=True)
 
-    def run_eval(ds: TorchTokenDataset):
-        gru_model.eval()
-        all_logits = []
-        all_y = []
-        with torch.no_grad():
-            loader = DataLoader(ds, batch_size=int(gru_batch), shuffle=False)
-            for b in loader:
-                input_ids = b["input_ids"].to(device)
-                attn = b["attention_mask"].to(device)
-                labels = b["labels"].to(device)
-                logits = gru_model(input_ids, attn)
-                all_logits.append(logits.detach().cpu())
-                all_y.append(labels.detach().cpu())
-        logits = torch.cat(all_logits, dim=0).numpy()
-        y_true = torch.cat(all_y, dim=0).numpy()
-        y_pred = logits.argmax(axis=1)
-        acc = float(accuracy_score(y_true, y_pred))
-        f1m = float(f1_score(y_true, y_pred, average="macro", zero_division=0))
-        return acc, f1m, y_true, y_pred
+    train_loader = make_loader(X_train_ids, M_train, y_train, gru_batch)
+    val_loader   = make_loader(X_val_ids,   M_val,   y_val,   gru_batch)
+    test_loader  = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(X_test_ids, M_test, y_test),
+        batch_size=int(gru_batch),
+        shuffle=False
+    )
 
-    best_val = -1.0
-    patience = 1 if fast_mode else 2
+    best_val = float("inf")
+    patience = 1
     bad = 0
-    best_state = None
 
-    for ep in range(int(gru_epochs)):
+    for _epoch in range(int(gru_epochs)):
         gru_model.train()
-        loader = DataLoader(train_tds, batch_size=int(gru_batch), shuffle=True)
-        for b in loader:
-            input_ids = b["input_ids"].to(device)
-            attn = b["attention_mask"].to(device)
-            labels = b["labels"].to(device)
-
-            optimizer.zero_grad(set_to_none=True)
-            logits = gru_model(input_ids, attn)
-            loss = loss_fn(logits, labels)
+        for xb, mb, yb in train_loader:
+            xb, mb, yb = xb.to(device), mb.to(device), yb.to(device)
+            opt.zero_grad(set_to_none=True)
+            logits = gru_model(xb, attention_mask=mb)
+            loss = loss_fn(logits, yb)
             loss.backward()
-            optimizer.step()
+            opt.step()
 
-        val_acc, val_f1m, *_ = run_eval(val_tds)
-        if val_f1m > best_val:
-            best_val = val_f1m
-            best_state = {k: v.detach().cpu().clone() for k, v in gru_model.state_dict().items()}
+        # val
+        gru_model.eval()
+        val_loss = 0.0
+        n = 0
+        with torch.no_grad():
+            for xb, mb, yb in val_loader:
+                xb, mb, yb = xb.to(device), mb.to(device), yb.to(device)
+                logits = gru_model(xb, attention_mask=mb)
+                loss = loss_fn(logits, yb)
+                val_loss += float(loss.item()) * yb.size(0)
+                n += yb.size(0)
+        val_loss = val_loss / max(n, 1)
+
+        if val_loss < best_val - 1e-6:
+            best_val = val_loss
             bad = 0
         else:
             bad += 1
-            if bad >= patience:
+            if bad > patience:
                 break
 
-    if best_state is not None:
-        gru_model.load_state_dict(best_state)
+    # test GRU
+    gru_model.eval()
+    all_pred = []
+    all_true = []
+    with torch.no_grad():
+        for xb, mb, yb in test_loader:
+            xb, mb = xb.to(device), mb.to(device)
+            logits = gru_model(xb, attention_mask=mb)
+            pred = torch.argmax(logits, dim=1).cpu().numpy().tolist()
+            all_pred.extend(pred)
+            all_true.extend(yb.numpy().tolist())
 
-    test_acc, test_f1m, y_true, y_pred = run_eval(test_tds)
-    gru_cm = confusion_matrix(y_true, y_pred, labels=list(range(num_labels)))
-    gru_report = classification_report(y_true, y_pred, target_names=label_names, output_dict=True, zero_division=0)
+    gru_acc = float(accuracy_score(all_true, all_pred))
+    gru_f1m = float(f1_score(all_true, all_pred, average="macro", zero_division=0))
+    gru_cm  = confusion_matrix(all_true, all_pred, labels=list(range(num_labels)))
+    gru_report = classification_report(all_true, all_pred, target_names=label_names, output_dict=True, zero_division=0)
 
     return {
         "label_names": label_names,
         "sizes": {"train": len(train_df), "val": len(val_df), "test": len(test_df)},
         "bert": {"test_accuracy": bert_acc, "test_macro_f1": bert_f1m, "cm": bert_cm, "report": bert_report},
-        "gru":  {"test_accuracy": test_acc,  "test_macro_f1": test_f1m,  "cm": gru_cm,  "report": gru_report},
+        "gru":  {"test_accuracy": gru_acc,  "test_macro_f1": gru_f1m,  "cm": gru_cm,  "report": gru_report},
         "meta": {
             "fast_mode": fast_mode,
             "max_train_samples": int(max_train_samples),
             "bert_epochs": int(bert_epochs),
             "gru_epochs": int(gru_epochs),
             "gru_batch": int(gru_batch),
-            "torch_cuda": bool(torch.cuda.is_available() if torch is not None else False),
+            "torch_cuda": bool(use_cuda),
             "effective_max_len": int(effective_max_len),
+            "bert_batch": 2,
+            "grad_accum": 8,
         }
     }
 
 
 # =========================
-# UI: Preview + Distribusi + Train
+# TAB 1: RINGKAS
 # =========================
-tab1, tab2 = st.tabs(["🏠 Ringkas", "📊 EDA Detail"])
-
 with tab1:
     c1, c2, c3 = st.columns(3)
     with c1: st.metric("Jumlah baris", int(len(df_raw)))
@@ -670,7 +753,7 @@ with tab1:
 
     st.subheader("Jumlah emosi")
     if LABEL_COL not in df.columns:
-        st.warning(f"Kolom label `{LABEL_COL}` tidak ada → training tidak bisa jalan.")
+        st.warning(f"Kolom label `{LABEL_COL}` tidak ada → distribusi emosi & training tidak bisa jalan.")
     else:
         s = df[LABEL_COL].astype(str).str.strip().str.lower()
         s = s[(s.notna()) & (s != "") & (s != "nan")]
@@ -690,7 +773,7 @@ with tab1:
             with cols[i]:
                 st.markdown(
                     f"""
-                    <div class="card">
+                    <div class="card-pink">
                         <div style="font-size:34px;line-height:1;">{row.emoji}</div>
                         <div style="font-size:18px;font-weight:700;margin-top:6px;">{row.emosi}</div>
                         <div style="font-size:16px;margin-top:6px;">{int(row.jumlah)} ({row.persen}%)</div>
@@ -699,7 +782,14 @@ with tab1:
                     unsafe_allow_html=True
                 )
 
+        st.markdown("<div class='gap-emosi-table'></div>", unsafe_allow_html=True)
         st.dataframe(dist_df, use_container_width=True)
+
+    st.markdown("<div style='height:14px;'></div>", unsafe_allow_html=True)
+    st.subheader("Total data setelah EDA & Preprocessing")
+    st.metric("Total data (setelah preprocessing)", int(len(df)))
+    removed = int(len(df_raw) - len(df))
+    st.caption(f"Data berkurang: {removed} baris (dari {len(df_raw)} → {len(df)})")
 
     st.divider()
     st.subheader("Hasil prediksi model (Evaluasi TEST)")
@@ -730,6 +820,7 @@ with tab1:
                     st.session_state["results"] = results
                 except Exception as e:
                     st.error(f"Gagal training/evaluasi: {e}")
+                    st.code(traceback.format_exc())
                     st.stop()
 
     if st.session_state.get("results") is None:
@@ -763,15 +854,36 @@ with tab1:
             st.json(res["meta"])
 
 
+# =========================
+# TAB 2: EDA DETAIL
+# =========================
 with tab2:
-    st.subheader("EDA Detail")
-    st.write("**Missing per kolom**")
-    miss_df = pd.DataFrame({
-        "dtype": df_raw.dtypes.astype(str),
-        "missing": df_raw.isna().sum()
-    }).sort_values("missing", ascending=False)
-    st.dataframe(miss_df, use_container_width=True)
+    if not show_eda_detail:
+        st.info("EDA detail dimatikan di sidebar.")
+    else:
+        st.subheader("EDA Detail")
 
-    if TEXT_COL in df_raw.columns:
-        dup_count = int(df_raw.duplicated(subset=[TEXT_COL]).sum())
-        st.metric("Duplikasi komentar (berdasarkan kolom komentar)", dup_count)
+        st.write("**Missing per kolom**")
+        miss_df = pd.DataFrame({
+            "dtype": df_raw.dtypes.astype(str),
+            "missing": df_raw.isna().sum()
+        }).sort_values("missing", ascending=False)
+        st.dataframe(miss_df, use_container_width=True)
+
+        if TEXT_COL in df_raw.columns:
+            dup_count = int(df_raw.duplicated(subset=[TEXT_COL]).sum())
+            st.metric("Duplikasi komentar (berdasarkan kolom komentar)", dup_count)
+
+        if TEXT_COL in df_raw.columns:
+            tmp = df_raw.copy()
+            tmp[TEXT_COL] = tmp[TEXT_COL].astype(str).fillna("")
+            tmp["len_char"] = tmp[TEXT_COL].apply(len)
+            tmp["len_word"] = tmp[TEXT_COL].apply(lambda x: len(x.split()))
+
+            st.write("**Statistik panjang komentar (raw)**")
+            st.dataframe(tmp[["len_char", "len_word"]].describe(), use_container_width=True)
+
+            st.write("**Histogram panjang komentar (jumlah kata)**")
+            plot_hist(tmp["len_word"], "Distribusi Panjang Komentar (Jumlah Kata)", "Jumlah kata")
+        else:
+            st.warning(f"Kolom `{TEXT_COL}` tidak ada, jadi EDA panjang komentar tidak ditampilkan.")
