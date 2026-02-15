@@ -580,7 +580,7 @@ def run_all_training(
         gradient_accumulation_steps=8,
         num_train_epochs=int(bert_epochs),
         weight_decay=0.01,
-        evaluation_strategy="no",
+        eval_strategy="no",
         save_strategy="no",
         load_best_model_at_end=False,
         dataloader_num_workers=0,
@@ -887,3 +887,4 @@ with tab2:
             plot_hist(tmp["len_word"], "Distribusi Panjang Komentar (Jumlah Kata)", "Jumlah kata")
         else:
             st.warning(f"Kolom `{TEXT_COL}` tidak ada, jadi EDA panjang komentar tidak ditampilkan.")
+
