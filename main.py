@@ -654,7 +654,7 @@ def run_all_training(
 
     gru_model = GRUClassifier(emb_weight, pad_id=pad_id, hidden_size=hidden, num_labels=num_labels, dropout=drop).to(device)
     loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights_torch.to(device))
-    opt = torch.optim.Adam(gru_model.parameters(), lr=1e-3)
+    opt = torch.optim.Adam(gru_model.parameters(), lr=1e-4)
 
     def make_loader(X, M, y, batch):
         ds = torch.utils.data.TensorDataset(X, M, y)
@@ -887,4 +887,5 @@ with tab2:
             plot_hist(tmp["len_word"], "Distribusi Panjang Komentar (Jumlah Kata)", "Jumlah kata")
         else:
             st.warning(f"Kolom `{TEXT_COL}` tidak ada, jadi EDA panjang komentar tidak ditampilkan.")
+
 
